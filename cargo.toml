@@ -1,0 +1,9 @@
+[package]
+name = "aurore-de"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+chrono = "0.4"
+ureq = { version = "2.10", features = ["json"] }
+serde = { version = "1.0", features = ["derive"] }
