@@ -1,0 +1,25 @@
+@import url("/tmp/aurore_active.css");
+
+window#waybar {
+    background-color: @aurore_primary;
+    color: #e8f3ec;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+#custom-launcher {
+    font-size: 20px;
+    padding: 0 16px;
+    margin: 4px 0;
+    border-radius: 8px;
+    background-color: rgba(255, 255, 255, 0.12);
+}
+
+#custom-launcher:hover {
+    background-color: rgba(255, 255, 255, 0.25);
+}
+
+#clock {
+    padding: 0 14px;
+    font-size: 13px;
+}
