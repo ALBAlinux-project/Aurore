@@ -1,0 +1,1 @@
+ARCHlinux専用
