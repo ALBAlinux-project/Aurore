@@ -1,0 +1,24 @@
+{
+    "layer": "top",
+    "position": "bottom",
+    "height": 42,
+    "margin-bottom": 6,
+    "margin-left": 12,
+    "margin-right": 12,
+    "modules-left": ["wlr/taskbar"],
+    "modules-center": ["custom/launcher"],
+    "modules-right": ["tray", "clock"],
+    "custom/launcher": {
+        "format": "⊞",
+        "tooltip": false,
+        "on-click": "aurore-burzellaunch"
+    },
+    "wlr/taskbar": {
+        "format": "{icon}",
+        "icon-size": 22,
+        "on-click": "activate"
+    },
+    "clock": {
+        "format": "{:%H:%M}"
+    }
+}
