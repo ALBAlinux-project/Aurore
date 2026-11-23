@@ -9,7 +9,7 @@
     "modules-center": ["custom/launcher"],
     "modules-right": ["tray", "clock"],
     "custom/launcher": {
-        "format": "⊞",
+        "format": "A",
         "tooltip": false,
         "on-click": "aurore-burzellaunch"
     },
