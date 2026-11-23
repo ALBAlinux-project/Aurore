@@ -3,6 +3,7 @@ name = "aurore-de"
 version = "0.1.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
+description = "Arch Linux dynamic weather and time-based Wayland desktop environment"
 
 [[bin]]
 name = "aurore-de"
@@ -10,6 +11,6 @@ path = "src/main.rs"
 
 [dependencies]
 chrono = "0.4"
-ureq = { version = "2", features = ["json"] }
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
+ureq = { version = "2", default-features = false, features = ["json", "native-tls"] }
