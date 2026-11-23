@@ -2,19 +2,17 @@ use chrono::{Datelike, Local, Timelike};
 use serde::Deserialize;
 use std::{
     fs,
-    path::Path,
+    path::{Path, PathBuf},
     process::Command,
     sync::{Arc, Mutex},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
-const LAT: f64 = 35.6895;
-const LON: f64 = 139.6917;
-const BASE_HUE: f64 = 0.38;
 const CSS_PATH: &str = "/tmp/aurore_active.css";
+const CONFIG_INTERVAL: Duration = Duration::from_secs(2);
 const WEATHER_INTERVAL: Duration = Duration::from_secs(900);
-const COLOR_INTERVAL: Duration = Duration::from_secs(1);
+const WEATHER_RETRY: Duration = Duration::from_secs(60);
 const HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Clone, Copy, PartialEq)]
@@ -23,6 +21,26 @@ enum Weather {
     Cloudy,
     Rain,
     Snow,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(default)]
+struct Config {
+    lat: f64,
+    lon: f64,
+    base_hue: f64,
+    saturation_max: f64,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            lat: 35.6895,
+            lon: 139.6917,
+            base_hue: 0.38,
+            saturation_max: 0.55,
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -35,47 +53,19 @@ struct CurrentWeather {
     weathercode: i32,
 }
 
-struct AuroreEngine {
-    base_hue: f64,
-    weather: Weather,
+fn config_path() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    PathBuf::from(home).join(".config/aurore/aurore.toml")
 }
 
-impl AuroreEngine {
-    fn new(base_hue: f64) -> Self {
-        Self {
-            base_hue,
-            weather: Weather::Clear,
-        }
-    }
-
-    fn current_hex(&self) -> String {
-        let now = Local::now();
-        let sec = (now.hour() * 3600 + now.minute() * 60 + now.second()) as f64;
-        let daylight = 1.0 - ((sec / 86400.0) - 0.5).abs() * 2.0;
-
-        let season_shift = match now.month() {
-            3..=5 => -0.04,
-            6..=8 => 0.0,
-            9..=11 => -0.06,
-            _ => 0.05,
-        };
-
-        let (sat, val_mult) = match self.weather {
-            Weather::Clear => (0.55, 1.00),
-            Weather::Cloudy => (0.30, 0.85),
-            Weather::Rain => (0.35, 0.72),
-            Weather::Snow => (0.20, 1.05),
-        };
-
-        let hue = (self.base_hue + season_shift).rem_euclid(1.0);
-        let val = ((0.14 + daylight * 0.38) * val_mult).clamp(0.08, 0.90);
-
-        let (r, g, b) = hsv_to_rgb(hue, sat, val);
-        format!("#{:02x}{:02x}{:02x}", r, g, b)
-    }
+// 設定ファイルがなければ既定値を使う。書式が壊れている場合も既定値に戻す。
+fn load_config() -> Config {
+    fs::read_to_string(config_path())
+        .ok()
+        .and_then(|s| toml::from_str(&s).ok())
+        .unwrap_or_default()
 }
 
-/// 通信は Mutex の外で行う。失敗時は None を返す。
 fn fetch_weather(lat: f64, lon: f64) -> Option<Weather> {
     let url = format!(
         "https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&current_weather=true",
@@ -96,6 +86,34 @@ fn fetch_weather(lat: f64, lon: f64) -> Option<Weather> {
     })
 }
 
+fn current_hex(cfg: &Config, weather: Weather) -> String {
+    let now = Local::now();
+    let sec = (now.hour() * 3600 + now.minute() * 60 + now.second()) as f64;
+    let daylight = 1.0 - ((sec / 86400.0) - 0.5).abs() * 2.0;
+
+    let season_shift = match now.month() {
+        3..=5 => -0.04,
+        6..=8 => 0.0,
+        9..=11 => -0.06,
+        _ => 0.05,
+    };
+
+    let (sat, val_mult) = match weather {
+        Weather::Clear => (0.55, 1.00),
+        Weather::Cloudy => (0.30, 0.85),
+        Weather::Rain => (0.35, 0.72),
+        Weather::Snow => (0.20, 1.05),
+    };
+
+    // 設定の彩度上限を超えないように抑える
+    let sat = sat.min(cfg.saturation_max);
+    let hue = (cfg.base_hue + season_shift).rem_euclid(1.0);
+    let val = ((0.14 + daylight * 0.38) * val_mult).clamp(0.08, 0.90);
+
+    let (r, g, b) = hsv_to_rgb(hue, sat, val);
+    format!("#{:02x}{:02x}{:02x}", r, g, b)
+}
+
 fn hsv_to_rgb(h: f64, s: f64, v: f64) -> (u8, u8, u8) {
     let i = (h * 6.0).floor();
     let f = h * 6.0 - i;
@@ -113,7 +131,7 @@ fn hsv_to_rgb(h: f64, s: f64, v: f64) -> (u8, u8, u8) {
     ((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8)
 }
 
-/// 一時ファイルに書いてから rename するので、読み手が途中の内容を見ない。
+// 一時ファイルに書いてから rename するので、読み手が途中の内容を見ない。
 fn write_css_atomic(path: &Path, hex: &str) {
     let content = format!("@define-color aurore_primary {};\n", hex);
     let tmp = path.with_extension("css.tmp");
@@ -122,37 +140,66 @@ fn write_css_atomic(path: &Path, hex: &str) {
     }
 }
 
-/// Waybar に SIGUSR2 を送ると CSS を読み直す。
 fn reload_waybar() {
-    let _ = Command::new("pkill")
-        .args(["-SIGUSR2", "waybar"])
-        .status();
+    let _ = Command::new("pkill").args(["-SIGUSR2", "waybar"]).status();
 }
 
 fn main() {
-    let engine = Arc::new(Mutex::new(AuroreEngine::new(BASE_HUE)));
+    let config = Arc::new(Mutex::new(load_config()));
+    let weather = Arc::new(Mutex::new(Weather::Clear));
 
-    let weather_engine = Arc::clone(&engine);
+    // 設定ファイルを定期的に読み直す
+    let config_writer = Arc::clone(&config);
     thread::spawn(move || loop {
-        if let Some(w) = fetch_weather(LAT, LON) {
-            if let Ok(mut eng) = weather_engine.lock() {
-                eng.weather = w;
-            }
+        let fresh = load_config();
+        if let Ok(mut cfg) = config_writer.lock() {
+            *cfg = fresh;
         }
-        thread::sleep(WEATHER_INTERVAL);
+        thread::sleep(CONFIG_INTERVAL);
+    });
+
+    // 座標が変わったら即座に取り直し、通常は15分ごとに更新する
+    let config_reader = Arc::clone(&config);
+    let weather_writer = Arc::clone(&weather);
+    thread::spawn(move || {
+        let mut next_attempt = Instant::now();
+        let mut last_coords: Option<(f64, f64)> = None;
+        loop {
+            let (lat, lon) = match config_reader.lock() {
+                Ok(cfg) => (cfg.lat, cfg.lon),
+                Err(_) => (35.6895, 139.6917),
+            };
+
+            if last_coords != Some((lat, lon)) {
+                next_attempt = Instant::now();
+            }
+
+            if Instant::now() >= next_attempt {
+                match fetch_weather(lat, lon) {
+                    Some(w) => {
+                        if let Ok(mut current) = weather_writer.lock() {
+                            *current = w;
+                        }
+                        next_attempt = Instant::now() + WEATHER_INTERVAL;
+                    }
+                    None => {
+                        next_attempt = Instant::now() + WEATHER_RETRY;
+                    }
+                }
+                last_coords = Some((lat, lon));
+            }
+
+            thread::sleep(CONFIG_INTERVAL);
+        }
     });
 
     let css_path = Path::new(CSS_PATH);
     let mut last_hex = String::new();
 
     loop {
-        let hex = match engine.lock() {
-            Ok(eng) => eng.current_hex(),
-            Err(_) => {
-                thread::sleep(COLOR_INTERVAL);
-                continue;
-            }
-        };
+        let cfg = config.lock().map(|c| c.clone()).unwrap_or_default();
+        let w = weather.lock().map(|w| *w).unwrap_or(Weather::Clear);
+        let hex = current_hex(&cfg, w);
 
         if hex != last_hex {
             write_css_atomic(css_path, &hex);
@@ -160,6 +207,6 @@ fn main() {
             last_hex = hex;
         }
 
-        thread::sleep(COLOR_INTERVAL);
+        thread::sleep(Duration::from_secs(1));
     }
 }
