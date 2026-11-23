@@ -2,7 +2,8 @@ use chrono::{Datelike, Local, Timelike};
 use serde::Deserialize;
 use std::{
     fs,
-    path::{Path, PathBuf},
+    path::Path,
+    process::Command,
     sync::{Arc, Mutex},
     thread,
     time::Duration,
@@ -11,6 +12,7 @@ use std::{
 const LAT: f64 = 35.6895;
 const LON: f64 = 139.6917;
 const BASE_HUE: f64 = 0.38;
+const CSS_PATH: &str = "/tmp/aurore_active.css";
 const WEATHER_INTERVAL: Duration = Duration::from_secs(900);
 const COLOR_INTERVAL: Duration = Duration::from_secs(1);
 const HTTP_TIMEOUT: Duration = Duration::from_secs(10);
@@ -111,16 +113,6 @@ fn hsv_to_rgb(h: f64, s: f64, v: f64) -> (u8, u8, u8) {
     ((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8)
 }
 
-fn get_css_output_path() -> PathBuf {
-    if let Ok(home) = std::env::var("HOME") {
-        let mut p = PathBuf::from(home);
-        p.push(".cache/aurore/color.css");
-        p
-    } else {
-        PathBuf::from("/tmp/aurore_color.css")
-    }
-}
-
 /// 一時ファイルに書いてから rename するので、読み手が途中の内容を見ない。
 fn write_css_atomic(path: &Path, hex: &str) {
     let content = format!("@define-color aurore_primary {};\n", hex);
@@ -128,6 +120,13 @@ fn write_css_atomic(path: &Path, hex: &str) {
     if fs::write(&tmp, content).is_ok() {
         let _ = fs::rename(&tmp, path);
     }
+}
+
+/// Waybar に SIGUSR2 を送ると CSS を読み直す。
+fn reload_waybar() {
+    let _ = Command::new("pkill")
+        .args(["-SIGUSR2", "waybar"])
+        .status();
 }
 
 fn main() {
@@ -143,12 +142,9 @@ fn main() {
         thread::sleep(WEATHER_INTERVAL);
     });
 
-    let css_path = get_css_output_path();
-    if let Some(parent) = css_path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-
+    let css_path = Path::new(CSS_PATH);
     let mut last_hex = String::new();
+
     loop {
         let hex = match engine.lock() {
             Ok(eng) => eng.current_hex(),
@@ -159,7 +155,8 @@ fn main() {
         };
 
         if hex != last_hex {
-            write_css_atomic(&css_path, &hex);
+            write_css_atomic(css_path, &hex);
+            reload_waybar();
             last_hex = hex;
         }
 
