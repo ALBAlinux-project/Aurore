@@ -7,15 +7,16 @@ pkgdesc="Arch Linux dynamic weather and time-based Wayland desktop environment"
 arch=('x86_64')
 url="https://github.com/ALBAlinux-project/Aurore"
 license=('GPL-3.0-or-later')
-makedepends=('cargo')
+makedepends=('cargo' 'pkgconf')
 
 build() {
     cd "$startdir"
-    RUSTFLAGS="-C link-arg=-fuse-ld=bfd" cargo build --release
+    cargo build --release
 }
+
 package_aurore-de() {
     pkgdesc="Aurore desktop environment (Wayfire + Waybar, weather-driven color)"
-    depends=('wayfire' 'waybar' 'ttf-jetbrains-mono-nerd' 'pipewire-pulse' 'networkmanager')
+    depends=('wayfire' 'waybar' 'ttf-jetbrains-mono-nerd' 'pipewire-pulse' 'networkmanager' 'openssl')
 
     install -Dm755 "$startdir/target/release/aurore-de" "$pkgdir/usr/bin/aurore-de"
     install -Dm644 "$startdir/configs/wayfire.ini"   "$pkgdir/etc/xdg/aurore/wayfire.ini"
