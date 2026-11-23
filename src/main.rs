@@ -2,11 +2,18 @@ use chrono::{Datelike, Local, Timelike};
 use serde::Deserialize;
 use std::{
     fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
     thread,
     time::Duration,
 };
+
+const LAT: f64 = 35.6895;
+const LON: f64 = 139.6917;
+const BASE_HUE: f64 = 0.38;
+const WEATHER_INTERVAL: Duration = Duration::from_secs(900);
+const COLOR_INTERVAL: Duration = Duration::from_secs(1);
+const HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Clone, Copy, PartialEq)]
 enum Weather {
@@ -28,35 +35,14 @@ struct CurrentWeather {
 
 struct AuroreEngine {
     base_hue: f64,
-    lat: f64,
-    lon: f64,
     weather: Weather,
 }
 
 impl AuroreEngine {
-    fn new(base_hue: f64, lat: f64, lon: f64) -> Self {
+    fn new(base_hue: f64) -> Self {
         Self {
             base_hue,
-            lat,
-            lon,
             weather: Weather::Clear,
-        }
-    }
-
-    fn update_weather(&mut self) {
-        let url = format!(
-            "https://open-meteo.com{}&longitude={}&current_weather=true",
-            self.lat, self.lon
-        );
-        if let Ok(resp) = ureq::get(&url).call() {
-            if let Ok(data) = resp.into_json::<OpenMeteoRes>() {
-                self.weather = match data.current_weather.weathercode {
-                    0 | 1 => Weather::Clear,
-                    2 | 3 | 45 | 48 => Weather::Cloudy,
-                    71 | 73 | 75 | 77 | 85 | 86 => Weather::Snow,
-                    _ => Weather::Rain,
-                };
-            }
         }
     }
 
@@ -87,6 +73,27 @@ impl AuroreEngine {
     }
 }
 
+/// 通信は Mutex の外で行う。失敗時は None を返す。
+fn fetch_weather(lat: f64, lon: f64) -> Option<Weather> {
+    let url = format!(
+        "https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&current_weather=true",
+        lat, lon
+    );
+    let data: OpenMeteoRes = ureq::get(&url)
+        .timeout(HTTP_TIMEOUT)
+        .call()
+        .ok()?
+        .into_json()
+        .ok()?;
+
+    Some(match data.current_weather.weathercode {
+        0 | 1 => Weather::Clear,
+        2 | 3 | 45 | 48 => Weather::Cloudy,
+        71 | 73 | 75 | 77 | 85 | 86 => Weather::Snow,
+        _ => Weather::Rain,
+    })
+}
+
 fn hsv_to_rgb(h: f64, s: f64, v: f64) -> (u8, u8, u8) {
     let i = (h * 6.0).floor();
     let f = h * 6.0 - i;
@@ -114,15 +121,26 @@ fn get_css_output_path() -> PathBuf {
     }
 }
 
+/// 一時ファイルに書いてから rename するので、読み手が途中の内容を見ない。
+fn write_css_atomic(path: &Path, hex: &str) {
+    let content = format!("@define-color aurore_primary {};\n", hex);
+    let tmp = path.with_extension("css.tmp");
+    if fs::write(&tmp, content).is_ok() {
+        let _ = fs::rename(&tmp, path);
+    }
+}
+
 fn main() {
-    let engine = Arc::new(Mutex::new(AuroreEngine::new(0.38, 35.6895, 139.6917)));
+    let engine = Arc::new(Mutex::new(AuroreEngine::new(BASE_HUE)));
 
     let weather_engine = Arc::clone(&engine);
     thread::spawn(move || loop {
-        if let Ok(mut eng) = weather_engine.lock() {
-            eng.update_weather();
+        if let Some(w) = fetch_weather(LAT, LON) {
+            if let Ok(mut eng) = weather_engine.lock() {
+                eng.weather = w;
+            }
         }
-        thread::sleep(Duration::from_secs(900));
+        thread::sleep(WEATHER_INTERVAL);
     });
 
     let css_path = get_css_output_path();
@@ -130,12 +148,21 @@ fn main() {
         let _ = fs::create_dir_all(parent);
     }
 
+    let mut last_hex = String::new();
     loop {
-        if let Ok(eng) = engine.lock() {
-            let hex = eng.current_hex();
-            let content = format!("@define-color aurore_primary {};\n", hex);
-            let _ = fs::write(&css_path, content);
+        let hex = match engine.lock() {
+            Ok(eng) => eng.current_hex(),
+            Err(_) => {
+                thread::sleep(COLOR_INTERVAL);
+                continue;
+            }
+        };
+
+        if hex != last_hex {
+            write_css_atomic(&css_path, &hex);
+            last_hex = hex;
         }
-        thread::sleep(Duration::from_secs(1));
+
+        thread::sleep(COLOR_INTERVAL);
     }
 }
