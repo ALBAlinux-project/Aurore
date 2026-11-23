@@ -1,34 +1,40 @@
+# Maintainer: Nekota-san
 pkgbase=aurore
 pkgname=('aurore-de' 'aurore-burzellaunch')
 pkgver=0.1.0
 pkgrel=1
 pkgdesc="Arch Linux dynamic weather and time-based Wayland desktop environment"
 arch=('x86_64')
+url="https://github.com/ALBAlinux-project/Aurore"
 license=('GPL-3.0-or-later')
 makedepends=('cargo')
 
 build() {
-    cd ..
+    cd "$startdir"
     cargo build --release
 }
 
 package_aurore-de() {
+    pkgdesc="Aurore desktop environment (Wayfire + Waybar, weather-driven color)"
     depends=('wayfire' 'waybar' 'ttf-jetbrains-mono-nerd' 'pipewire-pulse' 'networkmanager')
-    cd ..
-    install -Dm755 target/release/aurore-de pkg/aurore-de/usr/bin/aurore-de
-    install -Dm644 configs/wayfire.ini pkg/aurore-de/etc/xdg/aurore/wayfire.ini
-    install -Dm644 configs/waybar.jsonc pkg/aurore-de/etc/xdg/aurore/waybar.jsonc
-    install -Dm644 configs/waybar.css pkg/aurore-de/etc/xdg/aurore/waybar.css
 
-    install -dm755 pkg/aurore-de/usr/share/wayland-sessions
-    printf '[Desktop Entry]\nName=Aurore\nComment=Dynamic Weather and Time Wayland Desktop\nExec=wayfire -c /etc/xdg/aurore/wayfire.ini\nType=Application\n' > pkg/aurore-de/usr/share/wayland-sessions/aurore.desktop
+    install -Dm755 "$startdir/target/release/aurore-de" "$pkgdir/usr/bin/aurore-de"
+    install -Dm644 "$startdir/configs/wayfire.ini"   "$pkgdir/etc/xdg/aurore/wayfire.ini"
+    install -Dm644 "$startdir/configs/waybar.jsonc"  "$pkgdir/etc/xdg/aurore/waybar.jsonc"
+    install -Dm644 "$startdir/configs/waybar.css"    "$pkgdir/etc/xdg/aurore/waybar.css"
+
+    install -dm755 "$pkgdir/usr/share/wayland-sessions"
+    printf '[Desktop Entry]\nName=Aurore\nComment=Dynamic Weather and Time Wayland Desktop\nExec=wayfire -c /etc/xdg/aurore/wayfire.ini\nType=Application\n' \
+        > "$pkgdir/usr/share/wayland-sessions/aurore.desktop"
 }
 
 package_aurore-burzellaunch() {
+    pkgdesc="Launcher for Aurore (fuzzel wrapper)"
     depends=('fuzzel')
-    cd ..
-    install -Dm644 configs/burzellaunch.ini pkg/aurore-burzellaunch/etc/xdg/aurore/burzellaunch.ini
-    install -dm755 pkg/aurore-burzellaunch/usr/bin
-    printf '#!/bin/sh\nexec fuzzel --config /etc/xdg/aurore/burzellaunch.ini "$@"\n' > pkg/aurore-burzellaunch/usr/bin/aurore-burzellaunch
-    chmod 755 pkg/aurore-burzellaunch/usr/bin/aurore-burzellaunch
+
+    install -Dm644 "$startdir/configs/burzellaunch.ini" "$pkgdir/etc/xdg/aurore/burzellaunch.ini"
+    install -dm755 "$pkgdir/usr/bin"
+    printf '#!/bin/sh\nexec fuzzel --config "${XDG_CACHE_HOME:-$HOME/.cache}/aurore/burzellaunch.ini" "$@"\n' \
+        > "$pkgdir/usr/bin/aurore-burzellaunch"
+    chmod 755 "$pkgdir/usr/bin/aurore-burzellaunch"
 }
