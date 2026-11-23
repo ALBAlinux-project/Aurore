@@ -11,9 +11,8 @@ makedepends=('cargo')
 
 build() {
     cd "$startdir"
-    cargo build --release
+    RUSTFLAGS="-C link-arg=-fuse-ld=bfd" cargo build --release --locked
 }
-
 package_aurore-de() {
     pkgdesc="Aurore desktop environment (Wayfire + Waybar, weather-driven color)"
     depends=('wayfire' 'waybar' 'ttf-jetbrains-mono-nerd' 'pipewire-pulse' 'networkmanager')
